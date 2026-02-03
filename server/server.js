@@ -1,12 +1,11 @@
 import "dotenv/config";
 import express from "express";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import cors from "cors";
 import OpenAI from "openai";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 /* ================= SECURITY MIDDLEWARE ================= */
 app.use(helmet());
@@ -18,14 +17,15 @@ app.use(
   })
 );
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  message: "Too many requests from this IP, try again after 15 minutes",
-});
-
-app.use(limiter);
 app.use(express.json({ limit: "10mb" }));
+
+/* ================= RATE LIMITING ================= */
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: "Too many requests from this IP, please try again later.",
+});
+app.use(limiter);
 
 /* ================= AI CLIENT SETUP ================= */
 const API_KEY = process.env.NEBIUS_API_KEY || process.env.OPENAI_API_KEY;
@@ -40,53 +40,73 @@ const client = new OpenAI({
   apiKey: API_KEY,
 });
 
-/* ================= HEALTH CHECK ================= */
-app.get("/", (req, res) => {
-  res.json({ status: "Code Explainer API running 🚀" });
-});
-
-/* ================= CODE EXPLAIN ENDPOINT ================= */
+/* ================= CODE EXPLANATION ENDPOINT ================= */
 app.post("/api/explain-code", async (req, res) => {
   try {
-    const { codeSnippet, language } = req.body;
+    const { code, language } = req.body;
 
-    if (!codeSnippet) {
-      return res.status(400).json({
-        error: "Code snippet is required",
-      });
+    if (!code) {
+      return res.status(400).json({ error: "Code is required" });
     }
 
     const messages = [
       {
         role: "system",
         content:
-          "You are a senior software engineer. Explain code clearly, line by line if needed, and mention improvements.",
+          "You are a senior software engineer. Explain code clearly, step-by-step, and mention possible improvements or optimizations.",
       },
       {
         role: "user",
-        content: `Explain the following ${language || ""} code snippet:\n\n${codeSnippet}`,
+        content: `Explain the following ${language || ""} code snippet:\n\n\`\`\`${language || ""}\n${code}\n\`\`\``,
       },
     ];
 
-    const completion = await client.chat.completions.create({
+    const response = await client.chat.completions.create({
       model: "meta-llama/Meta-Llama-3-8B-Instruct",
       messages,
       temperature: 0.3,
+      max_tokens: 800,
     });
 
-    const explanation = completion.choices[0].message.content;
+    const explanation = response?.choices[0]?.message?.content;
 
-    res.json({ explanation });
+    if (!explanation) {
+      return res.status(500).json({ error: "Failed to explain code" });
+    }
+
+    res.json({ explanation, language: language || "unknown" });
   } catch (err) {
     console.error("Code Explain API Error:", err);
-    res.status(500).json({
-      error: "Internal server error",
-      details: err.message,
-    });
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
+/* ================= HEALTH CHECK ENDPOINT ================= */
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    hasApiKey: !!API_KEY,
+    uptime: process.uptime(),
+  });
+});
+
+/* ================= GLOBAL ERROR HANDLER ================= */
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+/* ================= 404 HANDLER ================= */
+app.use("*", (req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
 /* ================= START SERVER ================= */
+const PORT = process.env.PORT || 3002;
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Enhanced API server listening on http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`API Key configured: ${!!API_KEY}`);
 });
