@@ -28,17 +28,22 @@ const limiter = rateLimit({
 app.use(limiter);
 
 /* ================= AI CLIENT SETUP ================= */
-const API_KEY = process.env.NEBIUS_API_KEY || process.env.OPENAI_API_KEY;
+const API_KEY = process.env.NEBIUS_API_KEY;
+
 
 if (!API_KEY) {
   console.error("❌ No API key found in environment variables");
   process.exit(1);
 }
+console.log("Nebius key loaded:", !!process.env.NEBIUS_API_KEY);
+
 
 const client = new OpenAI({
-  baseURL: "https://api.tokenfactory.nebius.com/v1/",
-  apiKey: API_KEY,
+  baseURL: "https://api.studio.nebius.com/v1/",
+  apiKey: process.env.NEBIUS_API_KEY,
 });
+
+
 
 /* ================= CODE EXPLANATION ENDPOINT ================= */
 app.post("/api/explain-code", async (req, res) => {
@@ -53,25 +58,26 @@ app.post("/api/explain-code", async (req, res) => {
       {
         role: "system",
         content:
-          "You are a senior software engineer. Explain code clearly, step-by-step, and mention possible improvements or optimizations.",
+          "You are a senior software engineer. Explain code step-by-step and suggest improvements.",
       },
       {
         role: "user",
-        content: `Explain the following ${language || ""} code snippet:\n\n\`\`\`${language || ""}\n${code}\n\`\`\``,
+        content: `Explain this ${language || ""} code:\n\n\`\`\`${language || ""}\n${code}\n\`\`\``,
       },
     ];
 
     const response = await client.chat.completions.create({
       model: "meta-llama/Meta-Llama-3-8B-Instruct",
+
       messages,
       temperature: 0.3,
       max_tokens: 800,
     });
 
-    const explanation = response?.choices[0]?.message?.content;
+    const explanation = response?.choices?.[0]?.message?.content;
 
     if (!explanation) {
-      return res.status(500).json({ error: "Failed to explain code" });
+      return res.status(500).json({ error: "Failed to generate explanation" });
     }
 
     res.json({ explanation, language: language || "unknown" });
@@ -81,7 +87,7 @@ app.post("/api/explain-code", async (req, res) => {
   }
 });
 
-/* ================= HEALTH CHECK ENDPOINT ================= */
+/* ================= HEALTH CHECK ================= */
 app.get("/api/health", (req, res) => {
   res.json({
     status: "healthy",
@@ -97,8 +103,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-/* ================= 404 HANDLER ================= */
-app.use("*", (req, res) => {
+/* ================= 404 HANDLER (EXPRESS 5 WAY) ================= */
+app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
@@ -106,7 +112,7 @@ app.use("*", (req, res) => {
 const PORT = process.env.PORT || 3002;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Enhanced API server listening on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
-  console.log(`API Key configured: ${!!API_KEY}`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`Health: http://localhost:${PORT}/api/health`);
+  console.log(`API Key Loaded: ${!!API_KEY}`);
 });
